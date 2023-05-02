@@ -12,6 +12,7 @@
 #define DISTANCE_THRESHOLD -1  // Minimum required distance change to upload, expressed in mm
 #define DIST_MIN 150           // Expressed in mm (minimum recommended distance for the A02YYUW : 30mm)
 #define DIST_MAX 1700          // Expressed in mm (maximum recommended distance for the A02YYUW : 4500mm)
+#define DIST_INLET 1470        // Distance to the pump inlet (used to compute the remaining volume)
 #define DIST_ERROR -1          // Value to return if distance reading failed
 #define DIST_OVERSAMPLING 5
 
@@ -119,7 +120,7 @@ void setup() {
 
   if (valid > 0) {
     distance = average(distances, valid);
-    waterLevel = DISTANCE_MAX - distance;
+    waterLevel = DIST_INLET - distance;
     volume = round(waterLevel * LITERS_PER_MM);
   }
 
