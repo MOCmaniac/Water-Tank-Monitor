@@ -9,7 +9,7 @@
 #define TX2 GPIO_NUM_13             // TX pin is used to choose between processed value (default - HIGH) and real-time value (LOW)
 
 // Sensor distance parameters
-#define DISTANCE_THRESHOLD -1  // Minimum required distance change to upload, expressed in mm
+#define DISTANCE_THRESHOLD 6  // Minimum required distance change to upload, expressed in mm
 #define DIST_MIN 150           // Expressed in mm (minimum recommended distance for the A02YYUW : 30mm)
 #define DIST_MAX 1700          // Expressed in mm (maximum recommended distance for the A02YYUW : 4500mm)
 #define DIST_INLET 1470        // Distance to the pump inlet (used to compute the remaining volume)
@@ -132,7 +132,7 @@ void setup() {
   // If the distance has been measured successfully, is different from the
   // previous one: upload to thingspeak
   // If the values haven't been updated for x times : upload to thingspeak
-  if ((valid > 0 && isOutsideThreshold(lastDistance, distance)) || bootWithoutUpdate >= FORCED_UPDATE_FREQUENCY) {
+  if (valid > 0 && (isOutsideThreshold(lastDistance, distance) || bootWithoutUpdate >= FORCED_UPDATE_FREQUENCY)) {
     DBG_PRINTLN("\nAttempting to connect to SSID: " + String(ssid));
 
     // Configures static IP address
