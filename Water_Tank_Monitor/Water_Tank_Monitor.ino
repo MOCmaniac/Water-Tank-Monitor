@@ -157,7 +157,7 @@ void setup() {
       int index = 0;
       char buffer[80];
       for (int x = 0; x < DIST_OVERSAMPLING; x++) {
-        index += sprintf(buffer + index, "%d\t", distances[x]);  // tabs makes it easy to copy into excel if needed
+        index += sprintf(buffer + index, "%d,", distances[x]);
       }
       ThingSpeak.setStatus(buffer);                                   // ThingSpeak limits this to 255 bytes (UTF8).
       int code = ThingSpeak.writeFields(channelNumber, writeAPIKey);  // 200 : Success
