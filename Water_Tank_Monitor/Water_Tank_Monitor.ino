@@ -10,7 +10,7 @@
 
 // Sensor distance parameters
 #define DISTANCE_THRESHOLD 6  // Minimum required distance change to upload, expressed in mm
-#define DIST_MIN 150           // Expressed in mm (minimum recommended distance for the A02YYUW : 30mm)
+#define DIST_MIN 135           // Expressed in mm (minimum recommended distance for the A02YYUW : 30mm)
 #define DIST_MAX 1700          // Expressed in mm (maximum recommended distance for the A02YYUW : 4500mm)
 #define DIST_INLET 1470        // Distance to the pump inlet (used to compute the remaining volume)
 #define DIST_ERROR -1          // Value to return if distance reading failed
@@ -44,8 +44,8 @@
 
 // WiFi parameters
 #define TIMEOUT_WIFI 8000             // Max allowed time to connect to wifi
-const char* ssid = "WifiName";  // Enter WiFi SSID
-const char* password = "Password";    // Enter WiFi password
+const char* ssid = "ssid";  // Enter WiFi SSID
+const char* password = "password";    // Enter WiFi password
 // Set your Static IP address
 IPAddress local_IP(192, 168, 0, 99);
 // Set your Gateway IP address
@@ -56,7 +56,7 @@ IPAddress secondaryDNS(212, 224, 129, 94);  //optional
 WiFiClient client;
 
 // Thingspeak parameters
-const long channelNumber = 1234567;            // Enter your channel number
+const long channelNumber = 1234567;       // Enter your channel number
 const char* writeAPIKey = "writeAPIKey";  // Enter your channel Write API Key
 
 int distances[DIST_OVERSAMPLING];
@@ -67,6 +67,7 @@ float Vbat = 0;
 
 RTC_DATA_ATTR int lastDistance = 0;
 RTC_DATA_ATTR int bootWithoutUpdate = 0;
+RTC_DATA_ATTR boolean firstBoot = true;
 
 void setup() {
   unsigned long startTime = millis();
@@ -106,7 +107,7 @@ void setup() {
   int attempt = 0;
   int valid = 0;
   while (attempt < 2 * DIST_OVERSAMPLING && valid < DIST_OVERSAMPLING) {
-    DBG_PRINTF("Attemp %d\n", attempt);
+      
     int d = readSensor(1000);
     if (isInsideLimits(d, DIST_MIN, DIST_MAX) && d != DIST_ERROR) {
       distances[valid++] = d;
@@ -132,7 +133,7 @@ void setup() {
   // If the distance has been measured successfully, is different from the
   // previous one: upload to thingspeak
   // If the values haven't been updated for x times : upload to thingspeak
-  if (valid > 0 && (isOutsideThreshold(lastDistance, distance) || bootWithoutUpdate >= FORCED_UPDATE_FREQUENCY)) {
+  if (valid > 0 && (isOutsideThreshold(lastDistance, distance) || bootWithoutUpdate >= FORCED_UPDATE_FREQUENCY || firstBoot)) {
     DBG_PRINTLN("\nAttempting to connect to SSID: " + String(ssid));
 
     // Configures static IP address
@@ -156,14 +157,16 @@ void setup() {
 
       int index = 0;
       char buffer[80];
-      for (int x = 0; x < DIST_OVERSAMPLING; x++) {
-        index += sprintf(buffer + index, "%d,", distances[x]);
+      index += sprintf(buffer + index, "%d", distances[0]);
+      for (int x = 1; x < DIST_OVERSAMPLING; x++) {
+        index += sprintf(buffer + index, ", %d", distances[x]);
       }
       ThingSpeak.setStatus(buffer);                                   // ThingSpeak limits this to 255 bytes (UTF8).
       int code = ThingSpeak.writeFields(channelNumber, writeAPIKey);  // 200 : Success
       if (code == 200) {
         lastDistance = distance;
         bootWithoutUpdate = 0;
+        firstBoot = false;
       }
       DBG_PRINTF("Upload to ThingSpeak : %d\n", code);
       DBG_PRINTF("Wifi time : %dms\n", (millis() - startWifi));
@@ -267,5 +270,5 @@ void blink(int pin, int time) {
 }
 
 float ADCCorrection(int in) {
-  return 1.0 * in + 0.0;
+  return 0.9846 * in + 205.89;
 }

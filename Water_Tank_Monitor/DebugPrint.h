@@ -1,6 +1,7 @@
 // Debug serial option
 
 //#define DEBUG // Comment this line to turn debug prints off
+
 #ifdef DEBUG
 #define DBG_PRINT(args) Serial.print(args)
 #define DBG_PRINTLN(args) Serial.println(args)
