@@ -56,8 +56,8 @@ IPAddress secondaryDNS(212, 224, 129, 94);  //optional
 WiFiClient client;
 
 // Thingspeak parameters
-const long channelNumber = 1234567;       // Enter your channel number
-const char* writeAPIKey = "writeAPIKey";  // Enter your channel Write API Key
+const long channelNumber = 1234567;       // Enter your channel number (channel ID)
+const char* writeAPIKey = "AZERTY";  // Enter your channel Write API Key
 
 int distances[DIST_OVERSAMPLING];
 int distance = DIST_ERROR;
@@ -67,7 +67,8 @@ float Vbat = 0;
 
 RTC_DATA_ATTR int lastDistance = 0;
 RTC_DATA_ATTR int bootWithoutUpdate = 0;
-RTC_DATA_ATTR boolean firstBoot = true;
+RTC_DATA_ATTR boolean isFirstBoot = true;
+RTC_DATA_ATTR int cumulativeWaterConsumption = 0;
 
 void setup() {
   unsigned long startTime = millis();
@@ -83,6 +84,10 @@ void setup() {
   pinMode(SENSOR_VCC_PIN, OUTPUT);
   pinMode(VOLTAGE_DIVIDER_PIN, INPUT);
   pinMode(VOLTAGE_DIVIDER_GROUND_PIN, OUTPUT);
+
+  if(isFirstBoot){
+    DBG_PRINTLN("This is the first boot");
+  }
 
   digitalWrite(VOLTAGE_DIVIDER_GROUND_PIN, LOW);
   unsigned int voltageSettled = millis() + SETTLING_TIME;
@@ -133,7 +138,7 @@ void setup() {
   // If the distance has been measured successfully, is different from the
   // previous one: upload to thingspeak
   // If the values haven't been updated for x times : upload to thingspeak
-  if (valid > 0 && (isOutsideThreshold(lastDistance, distance) || bootWithoutUpdate >= FORCED_UPDATE_FREQUENCY || firstBoot)) {
+  if (valid > 0 && (isOutsideThreshold(lastDistance, distance) || bootWithoutUpdate >= FORCED_UPDATE_FREQUENCY || isFirstBoot)) {
     DBG_PRINTLN("\nAttempting to connect to SSID: " + String(ssid));
 
     // Configures static IP address
@@ -142,6 +147,11 @@ void setup() {
     }
     unsigned int startWifi = millis();
     WiFi.begin(ssid, password);
+
+    int distanceDelta = lastDistance - distance;
+    if(distanceDelta > 0){
+      cumulativeWaterConsumption += distanceDelta;
+    }
 
     while (WiFi.status() != WL_CONNECTED && (startWifi + TIMEOUT_WIFI) > millis()) {
       delay(1);
@@ -154,19 +164,20 @@ void setup() {
       ThingSpeak.setField(1, waterLevel);
       ThingSpeak.setField(2, volume);
       ThingSpeak.setField(3, Vbat);
+      ThingSpeak.setField(4, (float) round(cumulativeWaterConsumption * LITERS_PER_MM));
 
       int index = 0;
-      char buffer[80];
+      char buffer[50]; // longest ex : 1100,1099,1101,1100,1000
       index += sprintf(buffer + index, "%d", distances[0]);
       for (int x = 1; x < DIST_OVERSAMPLING; x++) {
-        index += sprintf(buffer + index, ", %d", distances[x]);
+        index += sprintf(buffer + index, ",%d", distances[x]);
       }
       ThingSpeak.setStatus(buffer);                                   // ThingSpeak limits this to 255 bytes (UTF8).
       int code = ThingSpeak.writeFields(channelNumber, writeAPIKey);  // 200 : Success
       if (code == 200) {
         lastDistance = distance;
         bootWithoutUpdate = 0;
-        firstBoot = false;
+        isFirstBoot = false;
       }
       DBG_PRINTF("Upload to ThingSpeak : %d\n", code);
       DBG_PRINTF("Wifi time : %dms\n", (millis() - startWifi));
@@ -270,5 +281,5 @@ void blink(int pin, int time) {
 }
 
 float ADCCorrection(int in) {
-  return 0.9846 * in + 205.89;
+  return 0.9846 * in + 205.89; // Use your own values here
 }
