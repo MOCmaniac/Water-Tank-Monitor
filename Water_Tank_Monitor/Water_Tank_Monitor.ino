@@ -149,7 +149,7 @@ void setup() {
     WiFi.begin(ssid, password);
 
     int distanceDelta = lastDistance - distance;
-    if(distanceDelta > 0){
+    if(distanceDelta < 0){
       cumulativeWaterConsumption += distanceDelta;
     }
 
