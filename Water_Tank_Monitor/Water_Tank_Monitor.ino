@@ -9,11 +9,11 @@
 #define TX2 GPIO_NUM_13             // TX pin is used to choose between processed value (default - HIGH) and real-time value (LOW)
 
 // Sensor distance parameters
-#define DISTANCE_THRESHOLD 6  // Minimum required distance change to upload, expressed in mm
-#define DIST_MIN 135           // Expressed in mm (minimum recommended distance for the A02YYUW : 30mm)
-#define DIST_MAX 1700          // Expressed in mm (maximum recommended distance for the A02YYUW : 4500mm)
-#define DIST_INLET 1470        // Distance to the pump inlet (used to compute the remaining volume)
-#define DIST_ERROR -1          // Value to return if distance reading failed
+#define DISTANCE_THRESHOLD 5  // Minimum required distance change to upload, expressed in mm
+#define DIST_MIN 135          // Expressed in mm (minimum recommended distance for the A02YYUW : 30mm)
+#define DIST_MAX 1550         // Expressed in mm (maximum recommended distance for the A02YYUW : 4500mm)
+#define DIST_INLET 1470       // Distance to the pump inlet (used to compute the remaining volume)
+#define DIST_ERROR -1         // Value to return if distance reading failed
 #define DIST_OVERSAMPLING 5
 
 // LED parameters
@@ -24,7 +24,6 @@
 
 // Water tank parameters
 #define LITERS_PER_MM 3.464  // Diameter of 2m10, surface of 3.464m²
-#define DISTANCE_MAX 1600    // Distance from the sensor to the pump inlet
 
 // Deep sleep parameters
 #define uS_TO_S_FACTOR 1000000ULL  // Conversion factor from seconds to micro seconds
@@ -43,9 +42,9 @@
 #define VOLTAGE_OVERSAMPLING 32  // With an average over 32 readings, precision seems to be +- 1mV (precision is different from accuracy)
 
 // WiFi parameters
-#define TIMEOUT_WIFI 8000             // Max allowed time to connect to wifi
-const char* ssid = "ssid";  // Enter WiFi SSID
-const char* password = "password";    // Enter WiFi password
+#define TIMEOUT_WIFI 8000                  // Max allowed time to connect to wifi
+const char* ssid = "NeverMind";            // Enter WiFi SSID
+const char* password = "z3tfDqmYrbLphA7";  // Enter WiFi password
 // Set your Static IP address
 IPAddress local_IP(192, 168, 0, 99);
 // Set your Gateway IP address
@@ -56,19 +55,21 @@ IPAddress secondaryDNS(212, 224, 129, 94);  //optional
 WiFiClient client;
 
 // Thingspeak parameters
-const long channelNumber = 1234567;       // Enter your channel number (channel ID)
-const char* writeAPIKey = "AZERTY";  // Enter your channel Write API Key
+const long channelNumber = 1483281;            // Enter your channel number (channel ID)
+const char* writeAPIKey = "8T5JN2KJ5MRUB8YL";  // Enter your channel Write API Key
 
 int distances[DIST_OVERSAMPLING];
 int distance = DIST_ERROR;
+int distanceDelta = 0;
 int waterLevel = 0;
 int volume = 0;
+int cumulativeVolume = 0;
 float Vbat = 0;
 
 RTC_DATA_ATTR int lastDistance = 0;
 RTC_DATA_ATTR int bootWithoutUpdate = 0;
 RTC_DATA_ATTR boolean isFirstBoot = true;
-RTC_DATA_ATTR int cumulativeWaterConsumption = 0;
+RTC_DATA_ATTR int cumulativeDistance = 0;  // distance in mm, must divide cumulativeVolume by LITERS_PER_MM to set this value
 
 void setup() {
   unsigned long startTime = millis();
@@ -85,7 +86,7 @@ void setup() {
   pinMode(VOLTAGE_DIVIDER_PIN, INPUT);
   pinMode(VOLTAGE_DIVIDER_GROUND_PIN, OUTPUT);
 
-  if(isFirstBoot){
+  if (isFirstBoot) {
     DBG_PRINTLN("This is the first boot");
   }
 
@@ -112,7 +113,7 @@ void setup() {
   int attempt = 0;
   int valid = 0;
   while (attempt < 2 * DIST_OVERSAMPLING && valid < DIST_OVERSAMPLING) {
-      
+
     int d = readSensor(1000);
     if (isInsideLimits(d, DIST_MIN, DIST_MAX) && d != DIST_ERROR) {
       distances[valid++] = d;
@@ -128,11 +129,16 @@ void setup() {
     distance = average(distances, valid);
     waterLevel = DIST_INLET - distance;
     volume = round(waterLevel * LITERS_PER_MM);
+
+    if (!isFirstBoot) {
+      distanceDelta = distance - lastDistance;
+    }
   }
 
   DBG_PRINTF("Distance : %dmm\n", distance);
   DBG_PRINTF("Water level : %dmm\n", waterLevel);
   DBG_PRINTF("Volume : %dL\n", volume);
+  DBG_PRINTF("Distance delta : %dL\n", distanceDelta);
   DBG_PRINTF("Battery voltage : %.3fV\n", Vbat);
 
   // If the distance has been measured successfully, is different from the
@@ -148,11 +154,6 @@ void setup() {
     unsigned int startWifi = millis();
     WiFi.begin(ssid, password);
 
-    int distanceDelta = lastDistance - distance;
-    if(distanceDelta < 0){
-      cumulativeWaterConsumption += distanceDelta;
-    }
-
     while (WiFi.status() != WL_CONNECTED && (startWifi + TIMEOUT_WIFI) > millis()) {
       delay(1);
     }
@@ -160,14 +161,19 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
       DBG_PRINTF("Connected : %dms\n", millis() - startWifi);
 
+      if (distanceDelta > 0) {
+        cumulativeDistance += distanceDelta;
+      }
+      cumulativeVolume = round(cumulativeDistance * LITERS_PER_MM);
+
       // Set the fields with the values
       ThingSpeak.setField(1, waterLevel);
       ThingSpeak.setField(2, volume);
       ThingSpeak.setField(3, Vbat);
-      ThingSpeak.setField(4, (float) round(cumulativeWaterConsumption * LITERS_PER_MM));
+      ThingSpeak.setField(4, cumulativeVolume);
 
       int index = 0;
-      char buffer[50]; // longest ex : 1100,1099,1101,1100,1000
+      char buffer[50];  // longest ex : 1100,1099,1101,1100,1000
       index += sprintf(buffer + index, "%d", distances[0]);
       for (int x = 1; x < DIST_OVERSAMPLING; x++) {
         index += sprintf(buffer + index, ",%d", distances[x]);
@@ -178,6 +184,8 @@ void setup() {
         lastDistance = distance;
         bootWithoutUpdate = 0;
         isFirstBoot = false;
+      } else{
+        cumulativeDistance -= distanceDelta; // Need to remove the added value otherwise count distanceDelta multiple times
       }
       DBG_PRINTF("Upload to ThingSpeak : %d\n", code);
       DBG_PRINTF("Wifi time : %dms\n", (millis() - startWifi));
@@ -281,5 +289,5 @@ void blink(int pin, int time) {
 }
 
 float ADCCorrection(int in) {
-  return 0.9846 * in + 205.89; // Use your own values here
+  return 0.9846 * in + 205.89;  // Use your own values here
 }
