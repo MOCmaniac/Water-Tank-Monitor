@@ -10,7 +10,7 @@
 
 // Sensor distance parameters
 #define DISTANCE_THRESHOLD 5  // Minimum required distance change to upload, expressed in mm
-#define DIST_MIN 135          // Expressed in mm (minimum recommended distance for the A02YYUW : 30mm)
+#define DIST_MIN 110          // Expressed in mm (minimum recommended distance for the A02YYUW : 30mm)
 #define DIST_MAX 1550         // Expressed in mm (maximum recommended distance for the A02YYUW : 4500mm)
 #define DIST_INLET 1470       // Distance to the pump inlet (used to compute the remaining volume)
 #define DIST_ERROR -1         // Value to return if distance reading failed
@@ -19,7 +19,7 @@
 // LED parameters
 #define LED_ON_TIME 80  // Expressed in ms
 #define LED_R_PIN 16
-#define LED_G_PIN 17
+#define LED_G_PIN 17 // Seems to be broken
 #define LED_B_PIN 18
 
 // Water tank parameters
@@ -27,7 +27,7 @@
 
 // Deep sleep parameters
 #define uS_TO_S_FACTOR 1000000ULL  // Conversion factor from seconds to micro seconds
-#define TIME_TO_SLEEP 900          // Time ESP32 will go into deepsleep (in seconds)
+#define TIME_TO_SLEEP 900           // Time ESP32 will go into deepsleep (in seconds)
 
 #define FORCED_UPDATE_FREQUENCY 86400 / TIME_TO_SLEEP  // Force to update after 24h (60*60*24) / TIME_TO_SLEEP
 
@@ -57,19 +57,21 @@ WiFiClient client;
 // Thingspeak parameters
 const long channelNumber = 1483281;            // Enter your channel number (channel ID)
 const char* writeAPIKey = "8T5JN2KJ5MRUB8YL";  // Enter your channel Write API Key
+const char* readAPIKey = "J1SARJONVSSICH20";
 
 int distances[DIST_OVERSAMPLING];
 int distance = DIST_ERROR;
 int distanceDelta = 0;
 int waterLevel = 0;
 int volume = 0;
-int cumulativeVolume = 0;
+int cumulDist = 0;
+int cumulVol = 0;
 float Vbat = 0;
 
 RTC_DATA_ATTR int lastDistance = 0;
 RTC_DATA_ATTR int bootWithoutUpdate = 0;
 RTC_DATA_ATTR boolean isFirstBoot = true;
-RTC_DATA_ATTR int cumulativeDistance = 0;  // distance in mm, must divide cumulativeVolume by LITERS_PER_MM to set this value
+RTC_DATA_ATTR int cumulativeDistance = -1;  // distance in mm, must divide cumulativeVolume by LITERS_PER_MM to set this value
 
 void setup() {
   unsigned long startTime = millis();
@@ -79,8 +81,8 @@ void setup() {
   ThingSpeak.begin(client);
 
   DBG_PRINTLN("\n\n-----------------\nSetting pins mode");
-  pinMode(LED_G_PIN, OUTPUT);
-  digitalWrite(LED_G_PIN, HIGH);  // Turns LED off
+  pinMode(LED_R_PIN, OUTPUT);
+  digitalWrite(LED_R_PIN, HIGH);  // Turns LED off
   pinMode(SENSOR_GND_PIN, OUTPUT);
   pinMode(SENSOR_VCC_PIN, OUTPUT);
   pinMode(VOLTAGE_DIVIDER_PIN, INPUT);
@@ -97,7 +99,7 @@ void setup() {
   sensorPower(1);
 
   DBG_PRINTLN("LED indicator");
-  blink(LED_G_PIN, LED_ON_TIME);
+  blink(LED_R_PIN, LED_ON_TIME);
 
   while (voltageSettled > millis()) {
     //DBG_PRINTLN("Waiting for the voltage to settle");
@@ -161,16 +163,14 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
       DBG_PRINTF("Connected : %dms\n", millis() - startWifi);
 
-      if (distanceDelta > 0) {
-        cumulativeDistance += distanceDelta;
-      }
-      cumulativeVolume = round(cumulativeDistance * LITERS_PER_MM);
+      setCumulative();
+      updateCumulative();
 
       // Set the fields with the values
       ThingSpeak.setField(1, waterLevel);
       ThingSpeak.setField(2, volume);
       ThingSpeak.setField(3, Vbat);
-      ThingSpeak.setField(4, cumulativeVolume);
+      ThingSpeak.setField(4, cumulVol);
 
       int index = 0;
       char buffer[50];  // longest ex : 1100,1099,1101,1100,1000
@@ -183,9 +183,8 @@ void setup() {
       if (code == 200) {
         lastDistance = distance;
         bootWithoutUpdate = 0;
+        cumulativeDistance = cumulDist;
         isFirstBoot = false;
-      } else{
-        cumulativeDistance -= distanceDelta; // Need to remove the added value otherwise count distanceDelta multiple times
       }
       DBG_PRINTF("Upload to ThingSpeak : %d\n", code);
       DBG_PRINTF("Wifi time : %dms\n", (millis() - startWifi));
@@ -234,6 +233,37 @@ int readSensor(int time) {
   }
   DBG_PRINTF("\tReturning distance : %dmm\n", distance);
   return distance;
+}
+
+/*
+ * Code is supposed to be connected to the wifi when this function is called
+*/
+void setCumulative() {
+  if (cumulativeDistance == -1) {
+    DBG_PRINTLN("Cumulative distance not set, attempting to read it from ThingSpeak");
+    cumulDist = ThingSpeak.readIntField(channelNumber, 4, readAPIKey);
+
+    int statusCode = ThingSpeak.getLastReadStatus();
+    if (statusCode == 200) {
+      cumulativeDistance = round(cumulDist / LITERS_PER_MM);
+      DBG_PRINTF("New cumulative distance: %dmm\n", cumulativeDistance);
+    } else {
+      DBG_PRINTF("Problem reading channel. HTTP error code: %d\n", statusCode);
+    }
+  }
+}
+
+void updateCumulative() {
+  if (!isFirstBoot) {
+    distanceDelta = distance - lastDistance;
+  }
+
+  cumulDist = cumulativeDistance;
+  if (distanceDelta > 0 && volume < 4700) {
+    cumulDist += distanceDelta;
+  }
+  DBG_PRINTF("Cumul dist = %d\n", cumulDist);
+  cumulVol = round(cumulDist * LITERS_PER_MM);
 }
 
 bool isOutsideThreshold(int lastDistance, int distance) {
